@@ -17,34 +17,38 @@ def load_data():
     return df
 
 df = load_data()
+st.title("Enhanced SA2 House Dashboard")
 
-st.title("SA2 House Dashboard")
+# Dynamically list all possible filters based on non-numeric columns
+filter_columns = df.select_dtypes(include=['object']).columns.tolist()
 
-required_cols = ["State", "Property\nType", "SA2"]
-if all(col in df.columns for col in required_cols):
-    with st.sidebar:
-        st.header("Filters")
-        selected_states = st.multiselect("Select State(s):", sorted(df["State"].dropna().unique()))
-        selected_types = st.multiselect("Select Property Type(s):", sorted(df["Property\nType"].dropna().unique()))
-        selected_sa2s = st.multiselect("Select SA2(s):", sorted(df["SA2"].dropna().unique()))
+with st.sidebar:
+    st.header("Advanced Filters")
+    selected_filters = {}
+    for col in filter_columns:
+        values = sorted(df[col].dropna().unique())
+        selected = st.multiselect(f"Filter by {col}:", values)
+        if selected:
+            selected_filters[col] = selected
 
-    filtered_df = df.copy()
-    if selected_states:
-        filtered_df = filtered_df[filtered_df["State"].isin(selected_states)]
-    if selected_types:
-        filtered_df = filtered_df[filtered_df["Property\nType"].isin(selected_types)]
+filtered_df = df.copy()
+for col, selected_vals in selected_filters.items():
+    filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
 
-    st.dataframe(filtered_df, use_container_width=True)
+st.dataframe(filtered_df, use_container_width=True)
 
-    # CSV and Excel Export
-    st.download_button("Download Filtered Data as CSV", data=filtered_df.to_csv(index=False).encode(), file_name="filtered_data.csv", mime="text/csv")
+# CSV and Excel download
+st.download_button("Download Filtered Data as CSV", data=filtered_df.to_csv(index=False).encode(), file_name="filtered_data.csv", mime="text/csv")
 
-    excel_buffer = BytesIO()
-    with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
-        filtered_df.to_excel(writer, index=False, sheet_name="Filtered")
-    excel_buffer.seek(0)
-    st.download_button("Download Filtered Data as Excel", data=excel_buffer, file_name="filtered_data.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+excel_buffer = BytesIO()
+with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+    filtered_df.to_excel(writer, index=False, sheet_name="Filtered")
+excel_buffer.seek(0)
+st.download_button("Download Filtered Data as Excel", data=excel_buffer, file_name="filtered_data.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
+# Select SA2s for trend analysis
+if "SA2" in df.columns:
+    selected_sa2s = st.multiselect("Select SA2(s) to view trends:", sorted(df["SA2"].dropna().unique()))
     if selected_sa2s:
         st.subheader("Trend Comparison")
         fig = go.Figure()
@@ -65,21 +69,21 @@ if all(col in df.columns for col in required_cols):
         fig.update_layout(title="Year-wise Trends by SA2", xaxis_title="Year/Metric", yaxis_title="Value", hovermode="x unified", legend_title="SA2")
         st.plotly_chart(fig, use_container_width=True)
 
-        # Chart export
+        # Export chart safely
         for fmt in ["png", "svg", "pdf"]:
             try:
                 img_data = pio.to_image(fig, format=fmt, engine="kaleido")
-                mime = "image/svg+xml" if fmt == "svg" else f"image/{fmt}" if fmt in ["png"] else "application/pdf"
+                mime = "image/svg+xml" if fmt == "svg" else f"image/{fmt}" if fmt == "png" else "application/pdf"
                 st.download_button(f"Download Chart as {fmt.upper()}", data=img_data, file_name=f"trend_graph.{fmt}", mime=mime)
             except Exception as e:
-                st.warning(f"❌ Could not export {fmt.upper()} chart: {e}. Please ensure 'kaleido' is installed and working.")
+                st.warning(f"❌ Could not export {fmt.upper()} chart: {e}")
 
         # Grouped Summary
         st.subheader("2020–2025 Average (Mock Grouping)")
         avg_table = pd.DataFrame(group_data, columns=["SA2", "2020–2025 Avg"])
         st.table(avg_table)
 
-        # AI-style Summary
+        # AI Summary
         st.subheader("AI Summary for Selected SA2(s)")
         for sa2, avg_val in group_data:
             if avg_val > 80:
@@ -90,4 +94,4 @@ if all(col in df.columns for col in required_cols):
                 msg = f"🔴 {sa2} is currently underperforming in comparison to others."
             st.markdown(msg)
 else:
-    st.error("Missing required columns.")
+    st.error("SA2 column not found in the dataset.")
