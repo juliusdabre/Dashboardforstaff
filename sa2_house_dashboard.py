@@ -1,6 +1,8 @@
 
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
+from io import BytesIO
 
 st.set_page_config(page_title="SA2 House Dashboard", layout="wide")
 
@@ -14,36 +16,61 @@ def load_data():
     df.columns = df.iloc[header_row_index]
     df = df.drop(index=range(header_row_index + 1)).reset_index(drop=True)
 
-    # Drop columns that are completely empty
+    # Drop completely empty columns
     df = df.dropna(axis=1, how='all')
-
     return df
 
 df = load_data()
 
 st.title("SA2 House Dashboard")
 
-# Validate required columns
-state_column = "State"
-type_column = "Property\nType"
-
-if state_column in df.columns and type_column in df.columns:
+required_cols = ["State", "Property\nType", "SA2"]
+if all(col in df.columns for col in required_cols):
     with st.sidebar:
         st.header("Filters")
-        selected_states = st.multiselect("Select State(s):", sorted(df[state_column].dropna().unique()))
-        selected_types = st.multiselect("Select Property Type(s):", sorted(df[type_column].dropna().unique()))
+        selected_states = st.multiselect("Select State(s):", sorted(df["State"].dropna().unique()))
+        selected_types = st.multiselect("Select Property Type(s):", sorted(df["Property\nType"].dropna().unique()))
+        selected_sa2 = st.selectbox("Select SA2 for Trend Graph:", sorted(df["SA2"].dropna().unique()))
 
+    # Apply Filters
     filtered_df = df.copy()
     if selected_states:
-        filtered_df = filtered_df[filtered_df[state_column].isin(selected_states)]
+        filtered_df = filtered_df[filtered_df["State"].isin(selected_states)]
     if selected_types:
-        filtered_df = filtered_df[filtered_df[type_column].isin(selected_types)]
+        filtered_df = filtered_df[filtered_df["Property\nType"].isin(selected_types)]
 
     st.dataframe(filtered_df, use_container_width=True)
+
+    # Trend Graph with Year-wise Columns
+    sa2_data = df[df["SA2"] == selected_sa2]
+    numeric_cols = sa2_data.select_dtypes(include='number').columns.tolist()
+
+    if not sa2_data.empty and numeric_cols:
+        st.subheader(f"Trend Graph for SA2: {selected_sa2}")
+        fig, ax = plt.subplots(figsize=(10, 5))
+
+        transposed = sa2_data[numeric_cols].T
+        transposed.columns = ["Value"]
+        transposed.index.name = "Year"
+        transposed.reset_index(inplace=True)
+
+        ax.plot(transposed["Year"], transposed["Value"], marker='o', label=selected_sa2)
+        ax.set_xlabel("Year/Metric")
+        ax.set_ylabel("Value")
+        ax.set_title(f"Year-wise Trends for {selected_sa2}")
+        ax.legend()
+        ax.grid(True)
+        plt.xticks(rotation=45)
+        st.pyplot(fig)
+
+        # Export to PDF
+        buffer = BytesIO()
+        fig.savefig(buffer, format="pdf")
+        buffer.seek(0)
+        st.download_button("Download Trend Graph as PDF", data=buffer, file_name=f"{selected_sa2}_trend.pdf", mime="application/pdf")
+
+    else:
+        st.warning("No numeric trend data found for the selected SA2.")
 else:
-    missing = []
-    if state_column not in df.columns:
-        missing.append("'State'")
-    if type_column not in df.columns:
-        missing.append("'Property\\nType'")
+    missing = [col for col in required_cols if col not in df.columns]
     st.error("Missing required column(s): " + ", ".join(missing))
