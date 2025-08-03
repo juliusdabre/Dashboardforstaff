@@ -1,22 +1,18 @@
 
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
+import plotly.graph_objs as go
 from io import BytesIO
+import plotly.io as pio
 
 st.set_page_config(page_title="SA2 House Dashboard", layout="wide")
 
 @st.cache_data
 def load_data():
-    file_path = "SA2 Scores July 2025.xlsx"
-    df = pd.read_excel(file_path, sheet_name="House", header=None)
-
-    # Identify the header row dynamically where 'SA2' appears in the second column
+    df = pd.read_excel("SA2 Scores July 2025.xlsx", sheet_name="House", header=None)
     header_row_index = df[df.iloc[:, 1] == "SA2"].index[0]
     df.columns = df.iloc[header_row_index]
     df = df.drop(index=range(header_row_index + 1)).reset_index(drop=True)
-
-    # Drop empty columns
     df = df.dropna(axis=1, how='all')
     return df
 
@@ -30,9 +26,8 @@ if all(col in df.columns for col in required_cols):
         st.header("Filters")
         selected_states = st.multiselect("Select State(s):", sorted(df["State"].dropna().unique()))
         selected_types = st.multiselect("Select Property Type(s):", sorted(df["Property\nType"].dropna().unique()))
-        selected_sa2 = st.selectbox("Select SA2 for Trend Graph:", sorted(df["SA2"].dropna().unique()))
+        selected_sa2s = st.multiselect("Select SA2(s):", sorted(df["SA2"].dropna().unique()))
 
-    # Apply Filters
     filtered_df = df.copy()
     if selected_states:
         filtered_df = filtered_df[filtered_df["State"].isin(selected_states)]
@@ -41,39 +36,53 @@ if all(col in df.columns for col in required_cols):
 
     st.dataframe(filtered_df, use_container_width=True)
 
-    # Trend Graph
-    sa2_data = df[df["SA2"] == selected_sa2]
-    numeric_data = sa2_data.select_dtypes(include=["number", "float", "int"]).T
-    numeric_data.columns = ["Value"]
-    numeric_data.index.name = "Year"
-    numeric_data.reset_index(inplace=True)
+    st.download_button("Download Filtered Data as CSV", data=filtered_df.to_csv(index=False).encode(), file_name="filtered_data.csv", mime="text/csv")
+    st.download_button("Download Filtered Data as Excel", data=BytesIO(filtered_df.to_excel(index=False, engine='openpyxl')), file_name="filtered_data.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-    # Ensure the x and y data are numeric-compatible
-    try:
-        numeric_data["Value"] = pd.to_numeric(numeric_data["Value"], errors="coerce")
-        numeric_data = numeric_data.dropna(subset=["Value"])
+    if selected_sa2s:
+        st.subheader("Trend Comparison")
+        fig = go.Figure()
+        group_data = []
 
-        if not numeric_data.empty:
-            st.subheader(f"Trend Graph for SA2: {selected_sa2}")
-            fig, ax = plt.subplots(figsize=(10, 5))
-            ax.plot(numeric_data["Year"], numeric_data["Value"], marker="o", label=selected_sa2)
-            ax.set_xlabel("Year/Metric")
-            ax.set_ylabel("Value")
-            ax.set_title(f"Year-wise Trends for {selected_sa2}")
-            ax.legend()
-            ax.grid(True)
-            plt.xticks(rotation=45)
-            st.pyplot(fig)
+        for sa2 in selected_sa2s:
+            sa2_data = df[df["SA2"] == sa2]
+            if not sa2_data.empty:
+                num_data = sa2_data.select_dtypes(include=["number", "float", "int"]).T
+                num_data.columns = ["Value"]
+                num_data.index.name = "Year"
+                num_data.reset_index(inplace=True)
+                num_data["Value"] = pd.to_numeric(num_data["Value"], errors="coerce")
+                num_data = num_data.dropna(subset=["Value"])
+                group_data.append((sa2, num_data["Value"].mean()))
+                fig.add_trace(go.Scatter(x=num_data["Year"], y=num_data["Value"], mode="lines+markers", name=sa2))
 
-            # Export to PDF
-            buffer = BytesIO()
-            fig.savefig(buffer, format="pdf")
-            buffer.seek(0)
-            st.download_button("Download Trend Graph as PDF", data=buffer, file_name=f"{selected_sa2}_trend.pdf", mime="application/pdf")
-        else:
-            st.warning("No valid numeric trend data available to plot for the selected SA2.")
-    except Exception as e:
-        st.error(f"An error occurred while generating the graph: {e}")
+        fig.update_layout(title="Year-wise Trends by SA2", xaxis_title="Year/Metric", yaxis_title="Value", hovermode="x unified", legend_title="SA2")
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Download as image
+        png_data = pio.to_image(fig, format="png")
+        st.download_button("Download Chart as PNG", data=png_data, file_name="trend_graph.png", mime="image/png")
+
+        svg_data = pio.to_image(fig, format="svg")
+        st.download_button("Download Chart as SVG", data=svg_data, file_name="trend_graph.svg", mime="image/svg+xml")
+
+        pdf_data = pio.to_image(fig, format="pdf")
+        st.download_button("Download Chart as PDF", data=pdf_data, file_name="trend_graph.pdf", mime="application/pdf")
+
+        # Grouping Summary
+        st.subheader("2020–2025 Average (Mock Grouping)")
+        avg_table = pd.DataFrame(group_data, columns=["SA2", "2020–2025 Avg"])
+        st.table(avg_table)
+
+        # Mock AI Summary
+        st.subheader("AI Summary for Selected SA2(s)")
+        for sa2, avg_val in group_data:
+            if avg_val > 80:
+                msg = f"🔵 {sa2} shows very strong performance based on recent trends."
+            elif avg_val > 50:
+                msg = f"🟡 {sa2} has moderate performance with room to grow."
+            else:
+                msg = f"🔴 {sa2} is currently underperforming in comparison to others."
+            st.markdown(msg)
 else:
-    missing = [col for col in required_cols if col not in df.columns]
-    st.error("Missing required column(s): " + ", ".join(missing))
+    st.error("Missing required columns.")
