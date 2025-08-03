@@ -36,10 +36,9 @@ if all(col in df.columns for col in required_cols):
 
     st.dataframe(filtered_df, use_container_width=True)
 
-    # CSV download
+    # CSV and Excel Export
     st.download_button("Download Filtered Data as CSV", data=filtered_df.to_csv(index=False).encode(), file_name="filtered_data.csv", mime="text/csv")
 
-    # Excel download fix
     excel_buffer = BytesIO()
     with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
         filtered_df.to_excel(writer, index=False, sheet_name="Filtered")
@@ -66,20 +65,21 @@ if all(col in df.columns for col in required_cols):
         fig.update_layout(title="Year-wise Trends by SA2", xaxis_title="Year/Metric", yaxis_title="Value", hovermode="x unified", legend_title="SA2")
         st.plotly_chart(fig, use_container_width=True)
 
-        # Chart downloads
+        # Export chart as multiple formats
         for fmt in ["png", "svg", "pdf"]:
             try:
-                img_data = pio.to_image(fig, format=fmt)
-                st.download_button(f"Download Chart as {fmt.upper()}", data=img_data, file_name=f"trend_graph.{fmt}", mime=f"image/{'svg+xml' if fmt=='svg' else fmt}")
-            except Exception:
-                st.warning(f"{fmt.upper()} export failed. Ensure Kaleido is installed.")
+                img_data = pio.to_image(fig, format=fmt, engine="kaleido")
+                mime = "image/svg+xml" if fmt == "svg" else f"image/{fmt}" if fmt in ["png"] else "application/pdf"
+                st.download_button(f"Download Chart as {fmt.upper()}", data=img_data, file_name=f"trend_graph.{fmt}", mime=mime)
+            except Exception as e:
+                st.warning(f"{fmt.upper()} export failed: {e}")
 
-        # Average table
+        # Grouping Summary
         st.subheader("2020–2025 Average (Mock Grouping)")
         avg_table = pd.DataFrame(group_data, columns=["SA2", "2020–2025 Avg"])
         st.table(avg_table)
 
-        # AI-style summary
+        # AI Summary
         st.subheader("AI Summary for Selected SA2(s)")
         for sa2, avg_val in group_data:
             if avg_val > 80:
