@@ -86,7 +86,7 @@ if "SA2" in df.columns:
         # AI Summary
         st.subheader("AI Summary for Selected SA2(s)")
         for sa2, avg_val in group_data:
-            if avg_val > 80:
+            if avg_val > 65:
                 msg = f"🔵 {sa2} shows very strong performance based on recent trends."
             elif avg_val > 50:
                 msg = f"🟡 {sa2} has moderate performance with room to grow."
