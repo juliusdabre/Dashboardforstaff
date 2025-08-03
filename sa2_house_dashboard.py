@@ -36,8 +36,15 @@ if all(col in df.columns for col in required_cols):
 
     st.dataframe(filtered_df, use_container_width=True)
 
+    # CSV download
     st.download_button("Download Filtered Data as CSV", data=filtered_df.to_csv(index=False).encode(), file_name="filtered_data.csv", mime="text/csv")
-    st.download_button("Download Filtered Data as Excel", data=BytesIO(filtered_df.to_excel(index=False, engine='openpyxl')), file_name="filtered_data.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    # Excel download fix
+    excel_buffer = BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+        filtered_df.to_excel(writer, index=False, sheet_name="Filtered")
+    excel_buffer.seek(0)
+    st.download_button("Download Filtered Data as Excel", data=excel_buffer, file_name="filtered_data.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     if selected_sa2s:
         st.subheader("Trend Comparison")
@@ -59,22 +66,20 @@ if all(col in df.columns for col in required_cols):
         fig.update_layout(title="Year-wise Trends by SA2", xaxis_title="Year/Metric", yaxis_title="Value", hovermode="x unified", legend_title="SA2")
         st.plotly_chart(fig, use_container_width=True)
 
-        # Download as image
-        png_data = pio.to_image(fig, format="png")
-        st.download_button("Download Chart as PNG", data=png_data, file_name="trend_graph.png", mime="image/png")
+        # Chart downloads
+        for fmt in ["png", "svg", "pdf"]:
+            try:
+                img_data = pio.to_image(fig, format=fmt)
+                st.download_button(f"Download Chart as {fmt.upper()}", data=img_data, file_name=f"trend_graph.{fmt}", mime=f"image/{'svg+xml' if fmt=='svg' else fmt}")
+            except Exception:
+                st.warning(f"{fmt.upper()} export failed. Ensure Kaleido is installed.")
 
-        svg_data = pio.to_image(fig, format="svg")
-        st.download_button("Download Chart as SVG", data=svg_data, file_name="trend_graph.svg", mime="image/svg+xml")
-
-        pdf_data = pio.to_image(fig, format="pdf")
-        st.download_button("Download Chart as PDF", data=pdf_data, file_name="trend_graph.pdf", mime="application/pdf")
-
-        # Grouping Summary
+        # Average table
         st.subheader("2020–2025 Average (Mock Grouping)")
         avg_table = pd.DataFrame(group_data, columns=["SA2", "2020–2025 Avg"])
         st.table(avg_table)
 
-        # Mock AI Summary
+        # AI-style summary
         st.subheader("AI Summary for Selected SA2(s)")
         for sa2, avg_val in group_data:
             if avg_val > 80:
