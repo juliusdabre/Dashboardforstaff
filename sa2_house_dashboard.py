@@ -9,10 +9,10 @@ def load_data():
     file_path = "SA2 Scores July 2025.xlsx"
     df = pd.read_excel(file_path, sheet_name="House", header=None)
 
-    # Dynamically locate the header row and reset the DataFrame
+    # Locate header row dynamically
     header_row_index = df[df.iloc[:, 1] == "SA2"].index[0]
     df.columns = df.iloc[header_row_index]
-    df = df.drop(index=range(header_row_index + 1)).reset_index(drop=True)
+    df = df.drop(index=list(range(header_row_index + 1))).reset_index(drop=True)
 
     return df
 
@@ -20,23 +20,24 @@ df = load_data()
 
 st.title("SA2 House Dashboard")
 
-# Sidebar Filters
-with st.sidebar:
-    st.header("Filters")
-    state_col = "State"
-    type_col = "Property\nType"
+# Check for required columns
+required_columns = ["State", "Property\nType"]
+missing_columns = [col for col in required_columns if col not in df.columns]
 
-    if state_col in df.columns and type_col in df.columns:
-        states = st.multiselect("Select State(s):", sorted(df[state_col].dropna().unique()))
-        property_types = st.multiselect("Select Property Type(s):", sorted(df[type_col].dropna().unique()))
+if missing_columns:
+    st.error(f"The following required column(s) are missing: {', '.join(missing_columns)}")
+else:
+    # Sidebar filters
+    with st.sidebar:
+        st.header("Filters")
+        selected_states = st.multiselect("Select State(s):", sorted(df["State"].dropna().unique()))
+        selected_types = st.multiselect("Select Property Type(s):", sorted(df["Property\nType"].dropna().unique()))
 
-        # Apply Filters
-        filtered_df = df.copy()
-        if states:
-            filtered_df = filtered_df[filtered_df[state_col].isin(states)]
-        if property_types:
-            filtered_df = filtered_df[filtered_df[type_col].isin(property_types)]
+    # Apply filters
+    filtered_df = df.copy()
+    if selected_states:
+        filtered_df = filtered_df[filtered_df["State"].isin(selected_states)]
+    if selected_types:
+        filtered_df = filtered_df[filtered_df["Property\nType"].isin(selected_types)]
 
-        st.dataframe(filtered_df, use_container_width=True)
-    else:
-        st.error("The dataset is missing required columns.")
+    st.dataframe(filtered_df, use_container_width=True)
