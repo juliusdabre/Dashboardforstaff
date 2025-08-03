@@ -65,21 +65,21 @@ if all(col in df.columns for col in required_cols):
         fig.update_layout(title="Year-wise Trends by SA2", xaxis_title="Year/Metric", yaxis_title="Value", hovermode="x unified", legend_title="SA2")
         st.plotly_chart(fig, use_container_width=True)
 
-        # Export chart as multiple formats
+        # Chart export
         for fmt in ["png", "svg", "pdf"]:
             try:
                 img_data = pio.to_image(fig, format=fmt, engine="kaleido")
                 mime = "image/svg+xml" if fmt == "svg" else f"image/{fmt}" if fmt in ["png"] else "application/pdf"
                 st.download_button(f"Download Chart as {fmt.upper()}", data=img_data, file_name=f"trend_graph.{fmt}", mime=mime)
             except Exception as e:
-                st.warning(f"{fmt.upper()} export failed: {e}")
+                st.warning(f"❌ Could not export {fmt.upper()} chart: {e}. Please ensure 'kaleido' is installed and working.")
 
-        # Grouping Summary
+        # Grouped Summary
         st.subheader("2020–2025 Average (Mock Grouping)")
         avg_table = pd.DataFrame(group_data, columns=["SA2", "2020–2025 Avg"])
         st.table(avg_table)
 
-        # AI Summary
+        # AI-style Summary
         st.subheader("AI Summary for Selected SA2(s)")
         for sa2, avg_val in group_data:
             if avg_val > 80:
