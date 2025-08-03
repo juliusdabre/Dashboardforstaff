@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 
@@ -8,8 +7,11 @@ st.set_page_config(page_title="SA2 House Dashboard", layout="wide")
 def load_data():
     file_path = "SA2 Scores July 2025.xlsx"
     df = pd.read_excel(file_path, sheet_name="House", header=None)
-    df.columns = df.iloc[1]
-    df = df.drop([0, 1]).reset_index(drop=True)
+    
+    # Find the row where actual column headers start
+    header_row = df[df.iloc[:, 1] == "SA2"].index[0]
+    df.columns = df.iloc[header_row]
+    df = df.drop(index=list(range(header_row + 1))).reset_index(drop=True)
     return df
 
 df = load_data()
