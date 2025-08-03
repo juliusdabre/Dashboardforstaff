@@ -1,8 +1,4 @@
-# Overwrite the Streamlit script in the zip bundle with the final fixed version
-final_fixed_script_path = "/mnt/data/sa2_house_dashboard.py"
 
-# Rewriting the script content directly
-final_dashboard_code = """
 import streamlit as st
 import pandas as pd
 
@@ -28,7 +24,7 @@ st.title("SA2 House Dashboard")
 with st.sidebar:
     st.header("Filters")
     state_col = "State"
-    type_col = "Property\\nType"
+    type_col = "Property\nType"
 
     if state_col in df.columns and type_col in df.columns:
         states = st.multiselect("Select State(s):", sorted(df[state_col].dropna().unique()))
@@ -44,17 +40,3 @@ with st.sidebar:
         st.dataframe(filtered_df, use_container_width=True)
     else:
         st.error("The dataset is missing required columns.")
-"""
-
-# Save it to replace the broken version in the bundle
-with open(final_fixed_script_path, "w") as f:
-    f.write(final_dashboard_code)
-
-# Rebuild the zip bundle with corrected contents
-fixed_zip_path = "/mnt/data/SA2_House_Dashboard_Bundle_Fixed.zip"
-with zipfile.ZipFile(fixed_zip_path, "w") as zipf:
-    zipf.write(final_fixed_script_path, arcname="sa2_house_dashboard.py")
-    zipf.write("/mnt/data/SA2 Scores July 2025.xlsx", arcname="SA2 Scores July 2025.xlsx")
-    zipf.write("/mnt/data/requirements.txt", arcname="requirements.txt")
-
-fixed_zip_path
