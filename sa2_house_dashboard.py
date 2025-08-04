@@ -17,23 +17,36 @@ def load_data():
     return df
 
 df = load_data()
-st.title("Enhanced SA2 House Dashboard")
+st.title("Enhanced SA2 House Dashboard with Sliders")
 
-# Dynamically list all possible filters based on non-numeric columns
-filter_columns = df.select_dtypes(include=['object']).columns.tolist()
+# Separate object and numeric columns
+object_cols = df.select_dtypes(include=['object']).columns.tolist()
+numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns.tolist()
 
 with st.sidebar:
-    st.header("Advanced Filters")
+    st.header("Filters")
+
     selected_filters = {}
-    for col in filter_columns:
+    for col in object_cols:
         values = sorted(df[col].dropna().unique())
         selected = st.multiselect(f"Filter by {col}:", values)
         if selected:
             selected_filters[col] = selected
 
+    selected_ranges = {}
+    for col in numeric_cols:
+        if df[col].dropna().nunique() > 1:
+            min_val = float(df[col].min())
+            max_val = float(df[col].max())
+            selected_range = st.slider(f"Range for {col}:", min_val, max_val, (min_val, max_val))
+            selected_ranges[col] = selected_range
+
 filtered_df = df.copy()
 for col, selected_vals in selected_filters.items():
     filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
+
+for col, (min_val, max_val) in selected_ranges.items():
+    filtered_df = filtered_df[(filtered_df[col] >= min_val) & (filtered_df[col] <= max_val)]
 
 st.dataframe(filtered_df, use_container_width=True)
 
@@ -69,7 +82,6 @@ if "SA2" in df.columns:
         fig.update_layout(title="Year-wise Trends by SA2", xaxis_title="Year/Metric", yaxis_title="Value", hovermode="x unified", legend_title="SA2")
         st.plotly_chart(fig, use_container_width=True)
 
-        # Export chart safely
         for fmt in ["png", "svg", "pdf"]:
             try:
                 img_data = pio.to_image(fig, format=fmt, engine="kaleido")
@@ -78,12 +90,10 @@ if "SA2" in df.columns:
             except Exception as e:
                 st.warning(f"❌ Could not export {fmt.upper()} chart: {e}")
 
-        # Grouped Summary
         st.subheader("2020–2025 Average (Mock Grouping)")
         avg_table = pd.DataFrame(group_data, columns=["SA2", "2020–2025 Avg"])
         st.table(avg_table)
 
-        # AI Summary
         st.subheader("AI Summary for Selected SA2(s)")
         for sa2, avg_val in group_data:
             if avg_val > 65:
