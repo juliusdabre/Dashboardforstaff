@@ -1,4 +1,6 @@
+# Re-create the full app code with the updated logic embedded directly
 
+app_code = """
 import streamlit as st
 import pandas as pd
 import plotly.graph_objs as go
@@ -17,36 +19,75 @@ def load_data():
     return df
 
 df = load_data()
-st.title("Enhanced SA2 House Dashboard")
-
-# Dynamically list all possible filters based on non-numeric columns
-filter_columns = df.select_dtypes(include=['object']).columns.tolist()
+st.title("PropWealth Buyers Agency")
 
 with st.sidebar:
     st.header("Advanced Filters")
     selected_filters = {}
-    for col in filter_columns:
-        values = sorted(df[col].dropna().unique())
-        selected = st.multiselect(f"Filter by {col}:", values)
-        if selected:
-            selected_filters[col] = selected
+    slider_columns = {}
+
+    slider_filter_names = [
+        "Investor Score (Out Of 100)", "Socio economics", "Rental Turnover Score (SA2)", "Rent Affordability Score (SA2)",
+        "Sale Median Now", "List Price Median Now", "List Price Median 3m Ago", "List Price Median 12m Ago",
+        "Sale Median 3m Ago", "Sale Median 12m Ago", "Sale DoM Median Now", "Sale DoM Median 3m Ago", "Sale DoM Median 12m Ago",
+        "Lease Median Now", "Lease Median 12M Ago", "Sales Turnover Now (%)", "Sales Turnover 3M Change (%)",
+        "Sales Turnover 3M Ago (%)", "Sales Turnover 12M Ago (%)", "Yield", "Rental Turnover Now (%)",
+        "Rent Turnover 3M Change (%)", "Rent Turnover 3M Ago (%)", "Rent Turnover 12M Ago",
+        "Rent Affordability (% of Income)", "Buy Affordability (Years)", "For Sale Av Listings Now (SA3)",
+        "For Sale Av Listings 3m Ago (SA3)", "For Sale Av Listings 12m Ago (SA3)", "Inventory Now (SA3)",
+        "House Median Now (SA3)", "House Median 12M Ago (SA3)", "House Median 24M Ago (SA3)",
+        "12m Growth (%)", "24m Growth (%)", "Current Sa3 Turnover (%)", "3M Change Turnover",
+        "Sa3 Turnover 12M Ago", "10 Year Annual Growth (%)", "House Median Rent Now (SA3)",
+        "House Median Rent 12M Ago (SA3)", "12m Area Rent Change (%)", "Growth Gap", "Family Household (%)"
+    ]
+
+    for col in df.columns:
+        col_str = str(col).strip()
+        if col_str in slider_filter_names:
+            try:
+                numeric_col = pd.to_numeric(df[col], errors='coerce')
+                if numeric_col.notnull().any():
+                    min_val = float(numeric_col.min())
+                    max_val = float(numeric_col.max())
+                    selected_range = st.slider(
+                        f"{col_str}", min_value=min_val, max_value=max_val, value=(min_val, max_val)
+                    )
+                    slider_columns[col] = (numeric_col, selected_range)
+            except Exception as e:
+                st.warning(f"Could not convert to slider: {col_str}. Error: {e}")
+        else:
+            if pd.api.types.is_object_dtype(df[col]):
+                values = sorted(df[col].dropna().unique())
+                selected = st.multiselect(f"Filter by {col_str}:", values)
+                if selected:
+                    selected_filters[col] = selected
 
 filtered_df = df.copy()
+
 for col, selected_vals in selected_filters.items():
     filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
 
+for col, (numeric_col, (min_val, max_val)) in slider_columns.items():
+    mask = (numeric_col >= min_val) & (numeric_col <= max_val)
+    filtered_df = filtered_df[mask]
+
 st.dataframe(filtered_df, use_container_width=True)
 
-# CSV and Excel download
-st.download_button("Download Filtered Data as CSV", data=filtered_df.to_csv(index=False).encode(), file_name="filtered_data.csv", mime="text/csv")
+st.download_button("Download Filtered Data as CSV",
+                   data=filtered_df.to_csv(index=False).encode(),
+                   file_name="filtered_data.csv",
+                   mime="text/csv")
 
 excel_buffer = BytesIO()
 with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
     filtered_df.to_excel(writer, index=False, sheet_name="Filtered")
 excel_buffer.seek(0)
-st.download_button("Download Filtered Data as Excel", data=excel_buffer, file_name="filtered_data.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-# Select SA2s for trend analysis
+st.download_button("Download Filtered Data as Excel",
+                   data=excel_buffer,
+                   file_name="filtered_data.xlsx",
+                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
 if "SA2" in df.columns:
     selected_sa2s = st.multiselect("Select SA2(s) to view trends:", sorted(df["SA2"].dropna().unique()))
     if selected_sa2s:
@@ -64,34 +105,50 @@ if "SA2" in df.columns:
                 num_data["Value"] = pd.to_numeric(num_data["Value"], errors="coerce")
                 num_data = num_data.dropna(subset=["Value"])
                 group_data.append((sa2, num_data["Value"].mean()))
-                fig.add_trace(go.Scatter(x=num_data["Year"], y=num_data["Value"], mode="lines+markers", name=sa2))
+                fig.add_trace(go.Scatter(x=num_data["Year"], y=num_data["Value"],
+                                         mode="lines+markers", name=sa2))
 
-        fig.update_layout(title="Year-wise Trends by SA2", xaxis_title="Year/Metric", yaxis_title="Value", hovermode="x unified", legend_title="SA2")
+        fig.update_layout(title="Year-wise Trends by SA2",
+                          xaxis_title="Year/Metric",
+                          yaxis_title="Value",
+                          hovermode="x unified",
+                          legend_title="SA2")
         st.plotly_chart(fig, use_container_width=True)
 
-        # Export chart safely
         for fmt in ["png", "svg", "pdf"]:
             try:
                 img_data = pio.to_image(fig, format=fmt, engine="kaleido")
                 mime = "image/svg+xml" if fmt == "svg" else f"image/{fmt}" if fmt == "png" else "application/pdf"
-                st.download_button(f"Download Chart as {fmt.upper()}", data=img_data, file_name=f"trend_graph.{fmt}", mime=mime)
+                st.download_button(f"Download Chart as {fmt.upper()}",
+                                   data=img_data,
+                                   file_name=f"trend_graph.{fmt}",
+                                   mime=mime)
             except Exception as e:
                 st.warning(f"❌ Could not export {fmt.upper()} chart: {e}")
 
-        # Grouped Summary
         st.subheader("2020–2025 Average (Mock Grouping)")
         avg_table = pd.DataFrame(group_data, columns=["SA2", "2020–2025 Avg"])
         st.table(avg_table)
 
-        # AI Summary
         st.subheader("AI Summary for Selected SA2(s)")
         for sa2, avg_val in group_data:
             if avg_val > 65:
-                msg = f"🔵 {sa2} shows very strong performance based on recent trends."
+                st.markdown(f"🔵 **{sa2}** shows very strong performance based on recent trends.")
             elif avg_val > 50:
-                msg = f"🟡 {sa2} has moderate performance with room to grow."
+                st.markdown(f"🟡 **{sa2}** has moderate performance with room to grow.")
             else:
-                msg = f"🔴 {sa2} is currently underperforming in comparison to others."
-            st.markdown(msg)
+                st.markdown(f"🔴 **{sa2}** is currently underperforming in comparison to others.")
 else:
     st.error("SA2 column not found in the dataset.")
+"""
+
+# Overwrite app.py with complete code
+app_path.write_text(app_code.strip())
+
+# Recreate the zip archive with full code
+zip_path = "/mnt/data/Propwealth_Dashboard.zip"
+with ZipFile(zip_path, "w") as zipf:
+    zipf.write(app_path, arcname="app.py")
+    zipf.write(requirements_path, arcname="requirements.txt")
+
+zip_path
