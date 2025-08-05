@@ -21,30 +21,43 @@ st.title("PropWealth Buyers Agency")
 # --- Sidebar Filters ---
 with st.sidebar:
     st.header("Advanced Filters")
-    selected_filters = {}    # For dropdowns
-    score_filters = {}       # For sliders
+    selected_filters = {}     # For dropdowns
+    slider_columns = {}       # For sliders
+
+    # Filters to convert to sliders
+    slider_filter_names = [
+        "Investor Score (Out Of 100)", "Socio economics", "Rental Turnover Score (SA2)", "Rent Affordability Score (SA2)",
+        "Sale Median Now", "List Price Median Now", "List Price Median 3m Ago", "List Price Median 12m Ago",
+        "Sale Median 3m Ago", "Sale Median 12m Ago", "Sale DoM Median Now", "Sale DoM Median 3m Ago", "Sale DoM Median 12m Ago",
+        "Lease Median Now", "Lease Median 12M Ago", "Sales Turnover Now (%)", "Sales Turnover 3M Change (%)",
+        "Sales Turnover 3M Ago (%)", "Sales Turnover 12M Ago (%)", "Yield", "Rental Turnover Now (%)",
+        "Rent Turnover 3M Change (%)", "Rent Turnover 3M Ago (%)", "Rent Turnover 12M Ago",
+        "Rent Affordability (% of Income)", "Buy Affordability (Years)", "For Sale Av Listings Now (SA3)",
+        "For Sale Av Listings 3m Ago (SA3)", "For Sale Av Listings 12m Ago (SA3)", "Inventory Now (SA3)",
+        "House Median Now (SA3)", "House Median 12M Ago (SA3)", "House Median 24M Ago (SA3)",
+        "12m Growth (%)", "24m Growth (%)", "Current Sa3 Turnover (%)", "3M Change Turnover",
+        "Sa3 Turnover 12M Ago", "10 Year Annual Growth (%)", "House Median Rent Now (SA3)",
+        "House Median Rent 12M Ago (SA3)", "12m Area Rent Change (%)", "Growth Gap", "Family Household (%)"
+    ]
 
     for col in df.columns:
-        col_lower = str(col).lower()
+        col_str = str(col).strip()
 
-        # Handle any column with "score" using slider
-        if 'score' in col_lower:
+        if col_str in slider_filter_names:
             try:
                 numeric_col = pd.to_numeric(df[col], errors='coerce')
-                if numeric_col.notnull().any():  # Ensure it's not all NaN
+                if numeric_col.notnull().any():
                     min_val = float(numeric_col.min())
                     max_val = float(numeric_col.max())
                     selected_range = st.slider(
-                        f"{col}", min_value=min_val, max_value=max_val, value=(min_val, max_val)
+                        f"{col_str}", min_value=min_val, max_value=max_val, value=(min_val, max_val)
                     )
-                    score_filters[col] = (numeric_col, selected_range)
+                    slider_columns[col] = (numeric_col, selected_range)
             except:
-                pass  # Skip if can't convert to numeric
-
-        # Handle categorical filters
+                pass
         elif pd.api.types.is_object_dtype(df[col]):
             values = sorted(df[col].dropna().unique())
-            selected = st.multiselect(f"Filter by {col}:", values)
+            selected = st.multiselect(f"Filter by {col_str}:", values)
             if selected:
                 selected_filters[col] = selected
 
@@ -56,8 +69,7 @@ for col, selected_vals in selected_filters.items():
     filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
 
 # Apply slider filters
-for col, (numeric_col, (min_val, max_val)) in score_filters.items():
-    # Keep same indices as df, not filtered_df
+for col, (numeric_col, (min_val, max_val)) in slider_columns.items():
     mask = (numeric_col >= min_val) & (numeric_col <= max_val)
     filtered_df = filtered_df[mask]
 
