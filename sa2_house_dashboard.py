@@ -16,7 +16,7 @@ def load_data():
     return df
 
 df = load_data()
-st.title("Enhanced SA2 House Dashboard")
+st.title("Propwealth Buyers Agency")
 
 # --- Sidebar Filters ---
 with st.sidebar:
