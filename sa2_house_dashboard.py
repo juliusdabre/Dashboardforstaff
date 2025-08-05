@@ -21,10 +21,10 @@ st.title("PropWealth Buyers Agency")
 # --- Sidebar Filters ---
 with st.sidebar:
     st.header("Advanced Filters")
-    selected_filters = {}     # For dropdowns
-    slider_columns = {}       # For sliders
+    selected_filters = {}
+    slider_columns = {}
 
-    # Filters to convert to sliders
+    # List of all filters you requested to be sliders
     slider_filter_names = [
         "Investor Score (Out Of 100)", "Socio economics", "Rental Turnover Score (SA2)", "Rent Affordability Score (SA2)",
         "Sale Median Now", "List Price Median Now", "List Price Median 3m Ago", "List Price Median 12m Ago",
@@ -53,8 +53,8 @@ with st.sidebar:
                         f"{col_str}", min_value=min_val, max_value=max_val, value=(min_val, max_val)
                     )
                     slider_columns[col] = (numeric_col, selected_range)
-            except:
-                pass
+            except Exception as e:
+                st.warning(f"Slider failed for {col_str}: {e}")
         elif pd.api.types.is_object_dtype(df[col]):
             values = sorted(df[col].dropna().unique())
             selected = st.multiselect(f"Filter by {col_str}:", values)
@@ -64,11 +64,9 @@ with st.sidebar:
 # --- Apply Filters ---
 filtered_df = df.copy()
 
-# Apply dropdown filters
 for col, selected_vals in selected_filters.items():
     filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
 
-# Apply slider filters
 for col, (numeric_col, (min_val, max_val)) in slider_columns.items():
     mask = (numeric_col >= min_val) & (numeric_col <= max_val)
     filtered_df = filtered_df[mask]
@@ -120,7 +118,6 @@ if "SA2" in df.columns:
                           legend_title="SA2")
         st.plotly_chart(fig, use_container_width=True)
 
-        # Chart export options
         for fmt in ["png", "svg", "pdf"]:
             try:
                 img_data = pio.to_image(fig, format=fmt, engine="kaleido")
@@ -132,20 +129,17 @@ if "SA2" in df.columns:
             except Exception as e:
                 st.warning(f"❌ Could not export {fmt.upper()} chart: {e}")
 
-        # Average Score Summary
         st.subheader("2020–2025 Average (Mock Grouping)")
         avg_table = pd.DataFrame(group_data, columns=["SA2", "2020–2025 Avg"])
         st.table(avg_table)
 
-        # AI Interpretation
         st.subheader("AI Summary for Selected SA2(s)")
         for sa2, avg_val in group_data:
             if avg_val > 65:
-                msg = f"🔵 {sa2} shows very strong performance based on recent trends."
+                st.markdown(f"🔵 **{sa2}** shows very strong performance based on recent trends.")
             elif avg_val > 50:
-                msg = f"🟡 {sa2} has moderate performance with room to grow."
+                st.markdown(f"🟡 **{sa2}** has moderate performance with room to grow.")
             else:
-                msg = f"🔴 {sa2} is currently underperforming in comparison to others."
-            st.markdown(msg)
+                st.markdown(f"🔴 **{sa2}** is currently underperforming in comparison to others.")
 else:
     st.error("SA2 column not found in the dataset.")
