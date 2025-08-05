@@ -17,7 +17,7 @@ def load_data():
     return df
 
 df = load_data()
-st.title("Enhanced SA2 House Dashboard")
+st.title("PropWealth Buyers Agency")
 
 # Dynamically list all possible filters based on non-numeric columns
 filter_columns = df.select_dtypes(include=['object']).columns.tolist()
