@@ -24,7 +24,7 @@ with st.sidebar:
     selected_filters = {}
     slider_columns = {}
 
-    # List of all filters you requested to be sliders
+    # List of filters to be converted to sliders
     slider_filter_names = [
         "Investor Score (Out Of 100)", "Socio economics", "Rental Turnover Score (SA2)", "Rent Affordability Score (SA2)",
         "Sale Median Now", "List Price Median Now", "List Price Median 3m Ago", "List Price Median 12m Ago",
@@ -42,7 +42,6 @@ with st.sidebar:
 
     for col in df.columns:
         col_str = str(col).strip()
-
         if col_str in slider_filter_names:
             try:
                 numeric_col = pd.to_numeric(df[col], errors='coerce')
@@ -54,7 +53,7 @@ with st.sidebar:
                     )
                     slider_columns[col] = (numeric_col, selected_range)
             except Exception as e:
-                st.warning(f"Slider failed for {col_str}: {e}")
+                st.warning(f"Could not create slider for {col_str}: {e}")
         elif pd.api.types.is_object_dtype(df[col]):
             values = sorted(df[col].dropna().unique())
             selected = st.multiselect(f"Filter by {col_str}:", values)
@@ -64,9 +63,11 @@ with st.sidebar:
 # --- Apply Filters ---
 filtered_df = df.copy()
 
+# Apply dropdown filters
 for col, selected_vals in selected_filters.items():
     filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
 
+# Apply slider filters
 for col, (numeric_col, (min_val, max_val)) in slider_columns.items():
     mask = (numeric_col >= min_val) & (numeric_col <= max_val)
     filtered_df = filtered_df[mask]
