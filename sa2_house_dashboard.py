@@ -81,7 +81,7 @@ st.download_button("Download Filtered Data as Excel",
                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # --- Trend Analysis ---
-#if "SA2" in df.columns:
+if "SA2" in df.columns:
     selected_sa2s = st.multiselect("Select SA2(s) to view trends:", sorted(df["SA2"].dropna().unique()))
     if selected_sa2s:
         st.subheader("Trend Comparison")
@@ -109,7 +109,7 @@ st.download_button("Download Filtered Data as Excel",
         st.plotly_chart(fig, use_container_width=True)
 
         # Chart export options
-      #  for fmt in ["png", "svg", "pdf"]:
+        for fmt in ["png", "svg", "pdf"]:
             try:
                 img_data = pio.to_image(fig, format=fmt, engine="kaleido")
                 mime = "image/svg+xml" if fmt == "svg" else f"image/{fmt}" if fmt == "png" else "application/pdf"
@@ -126,7 +126,7 @@ st.download_button("Download Filtered Data as Excel",
         st.table(avg_table)
 
         # AI Interpretation
-       # st.subheader("AI Summary for Selected SA2(s)")
+        st.subheader("AI Summary for Selected SA2(s)")
         for sa2, avg_val in group_data:
             if avg_val > 65:
                 msg = f"🔵 {sa2} shows very strong performance based on recent trends."
