@@ -24,7 +24,7 @@ with st.sidebar:
     selected_filters = {}
     slider_columns = {}
 
-    # List of filters to be converted to sliders
+    # ✅ Filters to be forced as sliders
     slider_filter_names = [
         "Investor Score (Out Of 100)", "Socio economics", "Rental Turnover Score (SA2)", "Rent Affordability Score (SA2)",
         "Sale Median Now", "List Price Median Now", "List Price Median 3m Ago", "List Price Median 12m Ago",
@@ -42,7 +42,9 @@ with st.sidebar:
 
     for col in df.columns:
         col_str = str(col).strip()
+
         if col_str in slider_filter_names:
+            # ✅ Force convert to numeric regardless of dtype
             try:
                 numeric_col = pd.to_numeric(df[col], errors='coerce')
                 if numeric_col.notnull().any():
@@ -53,21 +55,21 @@ with st.sidebar:
                     )
                     slider_columns[col] = (numeric_col, selected_range)
             except Exception as e:
-                st.warning(f"Could not create slider for {col_str}: {e}")
-        elif pd.api.types.is_object_dtype(df[col]):
-            values = sorted(df[col].dropna().unique())
-            selected = st.multiselect(f"Filter by {col_str}:", values)
-            if selected:
-                selected_filters[col] = selected
+                st.warning(f"Could not convert to slider: {col_str}. Error: {e}")
+        else:
+            # Handle all remaining object-type columns as dropdowns
+            if pd.api.types.is_object_dtype(df[col]):
+                values = sorted(df[col].dropna().unique())
+                selected = st.multiselect(f"Filter by {col_str}:", values)
+                if selected:
+                    selected_filters[col] = selected
 
 # --- Apply Filters ---
 filtered_df = df.copy()
 
-# Apply dropdown filters
 for col, selected_vals in selected_filters.items():
     filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
 
-# Apply slider filters
 for col, (numeric_col, (min_val, max_val)) in slider_columns.items():
     mask = (numeric_col >= min_val) & (numeric_col <= max_val)
     filtered_df = filtered_df[mask]
