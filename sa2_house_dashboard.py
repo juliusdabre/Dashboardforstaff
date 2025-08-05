@@ -18,50 +18,62 @@ def load_data():
 df = load_data()
 st.title("Enhanced SA2 House Dashboard")
 
-# SIDEBAR FILTERS
+# --- Sidebar Filters ---
 with st.sidebar:
     st.header("Advanced Filters")
-    selected_filters = {}
-    score_filters = {}
+    selected_filters = {}    # For dropdowns
+    score_filters = {}       # For sliders
 
     for col in df.columns:
-        # Score-based filters (numeric + name contains "score")
-        if 'score' in str(col).lower() and pd.api.types.is_numeric_dtype(df[col]):
+        col_lower = str(col).lower()
+
+        # Handle columns with 'score' in name and numeric type
+        if 'score' in col_lower and pd.api.types.is_numeric_dtype(df[col]):
             min_val = float(df[col].min())
             max_val = float(df[col].max())
-            selected_range = st.slider(f"{col}", min_val, max_val, (min_val, max_val))
+            selected_range = st.slider(
+                f"{col}", min_value=min_val, max_value=max_val, value=(min_val, max_val)
+            )
             score_filters[col] = selected_range
-        # Categorical filters (object/string columns)
+
+        # Handle object-type columns (categorical)
         elif pd.api.types.is_object_dtype(df[col]):
             values = sorted(df[col].dropna().unique())
             selected = st.multiselect(f"Filter by {col}:", values)
             if selected:
                 selected_filters[col] = selected
 
-# APPLY FILTERS
+# --- Apply Filters ---
 filtered_df = df.copy()
 
-# Apply categorical filters
+# Apply dropdown (categorical) filters
 for col, selected_vals in selected_filters.items():
     filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
 
-# Apply score filters
+# Apply slider (score-based) filters
 for col, (min_val, max_val) in score_filters.items():
     filtered_df = filtered_df[(filtered_df[col] >= min_val) & (filtered_df[col] <= max_val)]
 
-# DISPLAY FILTERED DATAFRAME
+# --- Show Filtered Data ---
 st.dataframe(filtered_df, use_container_width=True)
 
-# DOWNLOAD BUTTONS
-st.download_button("Download Filtered Data as CSV", data=filtered_df.to_csv(index=False).encode(), file_name="filtered_data.csv", mime="text/csv")
+# --- Download Buttons ---
+st.download_button("Download Filtered Data as CSV",
+                   data=filtered_df.to_csv(index=False).encode(),
+                   file_name="filtered_data.csv",
+                   mime="text/csv")
 
 excel_buffer = BytesIO()
 with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
     filtered_df.to_excel(writer, index=False, sheet_name="Filtered")
 excel_buffer.seek(0)
-st.download_button("Download Filtered Data as Excel", data=excel_buffer, file_name="filtered_data.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-# TREND ANALYSIS FOR SELECTED SA2s
+st.download_button("Download Filtered Data as Excel",
+                   data=excel_buffer,
+                   file_name="filtered_data.xlsx",
+                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+# --- Trend Analysis ---
 if "SA2" in df.columns:
     selected_sa2s = st.multiselect("Select SA2(s) to view trends:", sorted(df["SA2"].dropna().unique()))
     if selected_sa2s:
@@ -79,26 +91,34 @@ if "SA2" in df.columns:
                 num_data["Value"] = pd.to_numeric(num_data["Value"], errors="coerce")
                 num_data = num_data.dropna(subset=["Value"])
                 group_data.append((sa2, num_data["Value"].mean()))
-                fig.add_trace(go.Scatter(x=num_data["Year"], y=num_data["Value"], mode="lines+markers", name=sa2))
+                fig.add_trace(go.Scatter(x=num_data["Year"], y=num_data["Value"],
+                                         mode="lines+markers", name=sa2))
 
-        fig.update_layout(title="Year-wise Trends by SA2", xaxis_title="Year/Metric", yaxis_title="Value", hovermode="x unified", legend_title="SA2")
+        fig.update_layout(title="Year-wise Trends by SA2",
+                          xaxis_title="Year/Metric",
+                          yaxis_title="Value",
+                          hovermode="x unified",
+                          legend_title="SA2")
         st.plotly_chart(fig, use_container_width=True)
 
-        # EXPORT CHART OPTIONS
+        # Chart export options
         for fmt in ["png", "svg", "pdf"]:
             try:
                 img_data = pio.to_image(fig, format=fmt, engine="kaleido")
                 mime = "image/svg+xml" if fmt == "svg" else f"image/{fmt}" if fmt == "png" else "application/pdf"
-                st.download_button(f"Download Chart as {fmt.upper()}", data=img_data, file_name=f"trend_graph.{fmt}", mime=mime)
+                st.download_button(f"Download Chart as {fmt.upper()}",
+                                   data=img_data,
+                                   file_name=f"trend_graph.{fmt}",
+                                   mime=mime)
             except Exception as e:
                 st.warning(f"❌ Could not export {fmt.upper()} chart: {e}")
 
-        # GROUP SUMMARY
+        # Average Score Summary
         st.subheader("2020–2025 Average (Mock Grouping)")
         avg_table = pd.DataFrame(group_data, columns=["SA2", "2020–2025 Avg"])
         st.table(avg_table)
 
-        # AI INTERPRETATION
+        # AI Interpretation
         st.subheader("AI Summary for Selected SA2(s)")
         for sa2, avg_val in group_data:
             if avg_val > 65:
