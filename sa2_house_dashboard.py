@@ -27,16 +27,21 @@ with st.sidebar:
     for col in df.columns:
         col_lower = str(col).lower()
 
-        # Handle columns with 'score' in name and numeric type
-        if 'score' in col_lower and pd.api.types.is_numeric_dtype(df[col]):
-            min_val = float(df[col].min())
-            max_val = float(df[col].max())
-            selected_range = st.slider(
-                f"{col}", min_value=min_val, max_value=max_val, value=(min_val, max_val)
-            )
-            score_filters[col] = selected_range
+        # Handle any column with "score" using slider
+        if 'score' in col_lower:
+            try:
+                numeric_col = pd.to_numeric(df[col], errors='coerce')
+                if numeric_col.notnull().any():  # Ensure it's not all NaN
+                    min_val = float(numeric_col.min())
+                    max_val = float(numeric_col.max())
+                    selected_range = st.slider(
+                        f"{col}", min_value=min_val, max_value=max_val, value=(min_val, max_val)
+                    )
+                    score_filters[col] = (numeric_col, selected_range)
+            except:
+                pass  # Skip if can't convert to numeric
 
-        # Handle object-type columns (categorical)
+        # Handle categorical filters
         elif pd.api.types.is_object_dtype(df[col]):
             values = sorted(df[col].dropna().unique())
             selected = st.multiselect(f"Filter by {col}:", values)
@@ -46,13 +51,15 @@ with st.sidebar:
 # --- Apply Filters ---
 filtered_df = df.copy()
 
-# Apply dropdown (categorical) filters
+# Apply dropdown filters
 for col, selected_vals in selected_filters.items():
     filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
 
-# Apply slider (score-based) filters
-for col, (min_val, max_val) in score_filters.items():
-    filtered_df = filtered_df[(filtered_df[col] >= min_val) & (filtered_df[col] <= max_val)]
+# Apply slider filters
+for col, (numeric_col, (min_val, max_val)) in score_filters.items():
+    # Keep same indices as df, not filtered_df
+    mask = (numeric_col >= min_val) & (numeric_col <= max_val)
+    filtered_df = filtered_df[mask]
 
 # --- Show Filtered Data ---
 st.dataframe(filtered_df, use_container_width=True)
