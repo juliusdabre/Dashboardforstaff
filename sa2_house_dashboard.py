@@ -8,9 +8,41 @@ import requests
 from bs4 import BeautifulSoup
 import json
 import re
-from urllib.parse import quote_plus
 
 st.set_page_config(page_title="SA2 House Dashboard", layout="wide")
+
+NUMERIC_HINTS = (
+    "score", "yield", "growth", "inventory", "turnover", "days", "dom", "vacancy",
+    "rent", "price", "afford", "median", "months", "percent", "index"
+)
+
+def _coerce_numeric_cols(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+    # Convert obvious boolean-like columns to ints first
+    bool_like = []
+    for col in df.columns:
+        if df[col].dtype == "bool":
+            bool_like.append(col)
+        else:
+            # objects that look like booleans mixed in
+            vals = df[col].dropna().unique()
+            if len(vals) and all(v in [True, False, "True", "False", "TRUE", "FALSE"] for v in vals):
+                bool_like.append(col)
+    for col in bool_like:
+        df[col] = df[col].map({True: 1, False: 0, "True": 1, "False": 0, "TRUE": 1, "FALSE": 0}).astype("Int64")
+
+    # Target columns with numeric hints in the name for coercion
+    for col in df.columns:
+        name = str(col).lower()
+        if any(h in name for h in NUMERIC_HINTS):
+            df[col] = pd.to_numeric(df[col].astype(str).str.replace('%','', regex=False).str.replace(',','', regex=False), errors='coerce')
+
+    # Specific fix for known column in logs
+    if "Sales Turnover Score (SA2)" in df.columns:
+        df["Sales Turnover Score (SA2)"] = pd.to_numeric(df["Sales Turnover Score (SA2)"], errors="coerce")
+
+    return df
 
 @st.cache_data
 def load_data():
@@ -19,6 +51,7 @@ def load_data():
     df.columns = df.iloc[header_row_index]
     df = df.drop(index=range(header_row_index + 1)).reset_index(drop=True)
     df = df.dropna(axis=1, how='all')
+    df = _coerce_numeric_cols(df.copy())
     return df
 
 df = load_data()
@@ -31,7 +64,7 @@ with st.sidebar:
     st.header("Advanced Filters")
     selected_filters = {}
     for col in filter_columns:
-        values = sorted(df[col].dropna().unique())
+        values = sorted([v for v in df[col].dropna().unique() if v != ""])
         selected = st.multiselect(f"Filter by {col}:", values)
         if selected:
             selected_filters[col] = selected
@@ -40,6 +73,8 @@ filtered_df = df.copy()
 for col, selected_vals in selected_filters.items():
     filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
 
+# Ensure Arrow compatibility before rendering
+filtered_df = _coerce_numeric_cols(filtered_df.copy())
 st.dataframe(filtered_df, use_container_width=True)
 
 # CSV and Excel download
@@ -135,8 +170,7 @@ def parse_ld_json(soup):
         if isinstance(data, dict):
             data = [data]
         for obj in data:
-            if isinstance(obj, dict) and obj.get('@type') in ('Offer','Residence','SingleFamilyResidence','Apartment','House') or ('@graph' in obj):
-                # Flatten possible graphs
+            if isinstance(obj, dict) and (obj.get('@type') in ('Offer','Residence','SingleFamilyResidence','Apartment','House') or ('@graph' in obj)):
                 items = obj.get('@graph', [obj]) if '@graph' in obj else [obj]
                 for it in items:
                     addr = it.get('address', {})
@@ -184,10 +218,8 @@ def fetch_rea_listings(search_url, pages=1, timeout=15):
         dedup.append(r)
     return pd.DataFrame(dedup)
 
-# UI: Build URL from filtered suburbs
 st.markdown("### Search properties on realestate.com.au and export to CSV")
 if "SA2" in filtered_df.columns:
-    # Ask for state code (REA needs suburb+state)
     state_code = st.selectbox("State code (e.g., VIC/NSW/WA/SA/QLD/ACT/TAS/NT):", ["VIC","NSW","QLD","WA","SA","ACT","TAS","NT"], index=1)
     suburb_for_search = st.selectbox("Choose a suburb to search:", sorted(filtered_df["SA2"].dropna().unique()))
     col1, col2, col3, col4 = st.columns(4)
@@ -200,7 +232,6 @@ if "SA2" in filtered_df.columns:
     with col4:
         beds = st.selectbox("Min Beds", [None,1,2,3,4,5], index=0)
     max_pages = st.slider("Pages to fetch", 1, 10, 3)
-    # Construct URL
     base_url = build_rea_search_url(suburb_for_search, state_code, min_price if min_price>0 else None, max_price if max_price>0 else None, prop_type, beds)
     st.code(base_url, language="text")
     st.link_button(f"Open REA search for {suburb_for_search}", base_url)
@@ -209,7 +240,7 @@ if "SA2" in filtered_df.columns:
         with st.spinner("Fetching listings..."):
             df_list = fetch_rea_listings(custom_url, pages=max_pages)
         if df_list.empty:
-            st.error("No listings parsed. You may need to adjust the suburb/state or increase pages. Site structure can change.")
+            st.error("No listings parsed. Try increasing pages or paste the exact search URL from your browser.")
         else:
             st.success(f"Fetched {len(df_list)} listings")
             st.dataframe(df_list, use_container_width=True)
@@ -218,7 +249,7 @@ if "SA2" in filtered_df.columns:
 else:
     st.info("Filter or load data so SA2 (suburb) options appear.")
 
-# ---------- Trend analysis (unchanged) ----------
+# ---------- Trend analysis ----------
 if "SA2" in df.columns:
     selected_sa2s = st.multiselect("Select SA2(s) to view trends:", sorted(df["SA2"].dropna().unique()))
     if selected_sa2s:
