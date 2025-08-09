@@ -1,9 +1,9 @@
-
 import streamlit as st
 import pandas as pd
 import plotly.graph_objs as go
 from io import BytesIO
 import plotly.io as pio
+import webbrowser
 
 st.set_page_config(page_title="SA2 House Dashboard", layout="wide")
 
@@ -45,6 +45,16 @@ with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
     filtered_df.to_excel(writer, index=False, sheet_name="Filtered")
 excel_buffer.seek(0)
 st.download_button("Download Filtered Data as Excel", data=excel_buffer, file_name="filtered_data.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+# Realestate.com.au Search
+if not filtered_df.empty and "SA2" in filtered_df.columns:
+    suburb_for_search = st.selectbox("Search properties on realestate.com.au for suburb:", sorted(filtered_df["SA2"].dropna().unique()))
+    if suburb_for_search:
+        min_price = st.number_input("Min Price ($)", min_value=0, step=50000)
+        max_price = st.number_input("Max Price ($)", min_value=0, step=50000)
+        if st.button("Search on Realestate.com.au"):
+            search_url = f"https://www.realestate.com.au/buy/in-{suburb_for_search.replace(' ', '+')}/list-1?price={min_price}-{max_price}"
+            st.markdown(f"[Click here to view properties for {suburb_for_search}]({search_url})")
 
 # Select SA2s for trend analysis
 if "SA2" in df.columns:
