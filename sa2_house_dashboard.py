@@ -1,9 +1,14 @@
+
 import streamlit as st
 import pandas as pd
 import plotly.graph_objs as go
 from io import BytesIO
 import plotly.io as pio
-import webbrowser
+import requests
+from bs4 import BeautifulSoup
+import json
+import re
+from urllib.parse import quote_plus
 
 st.set_page_config(page_title="SA2 House Dashboard", layout="wide")
 
@@ -46,17 +51,174 @@ with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
 excel_buffer.seek(0)
 st.download_button("Download Filtered Data as Excel", data=excel_buffer, file_name="filtered_data.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-# Realestate.com.au Search
-if not filtered_df.empty and "SA2" in filtered_df.columns:
-    suburb_for_search = st.selectbox("Search properties on realestate.com.au for suburb:", sorted(filtered_df["SA2"].dropna().unique()))
-    if suburb_for_search:
-        min_price = st.number_input("Min Price ($)", min_value=0, step=50000)
-        max_price = st.number_input("Max Price ($)", min_value=0, step=50000)
-        if st.button("Search on Realestate.com.au"):
-            search_url = f"https://www.realestate.com.au/buy/in-{suburb_for_search.replace(' ', '+')}/list-1?price={min_price}-{max_price}"
-            st.markdown(f"[Click here to view properties for {suburb_for_search}]({search_url})")
+# ---------- realestate.com.au SEARCH + SCRAPE TO CSV ----------
+def build_rea_search_url(suburb:str, state_code:str, min_price:int|None=None, max_price:int|None=None, prop_type:str|None=None, beds:int|None=None, page:int=1):
+    # suburb slug like 'cranbourne-vic'
+    slug = f"{suburb.strip().lower().replace(' ', '-')}-{state_code.lower()}"
+    base = f"https://www.realestate.com.au/buy/in-{slug}/list-{page}"
+    params = []
+    if min_price is not None or max_price is not None:
+        lo = 0 if min_price is None else int(min_price)
+        hi = "" if max_price is None else int(max_price)
+        params.append(f"price={lo}-{hi}")
+    # property type mapping
+    pt_map = {
+        "Any": "",
+        "House": "property-house",
+        "Townhouse": "property-townhouse",
+        "Apartment/Unit": "property-unit+apartment",
+        "Land": "property-land",
+        "Villa": "property-villa",
+        "Duplex": "property-duplex"
+    }
+    if prop_type and pt_map.get(prop_type):
+        base = base.replace("/buy", f"/buy/{pt_map[prop_type]}")
+    if beds:
+        params.append(f"bedrooms={beds}-any")
+    if params:
+        return base + "?" + "&".join(params)
+    return base
 
-# Select SA2s for trend analysis
+def _first_text(el, selectors):
+    for sel in selectors:
+        hit = el.select_one(sel)
+        if hit:
+            t = hit.get_text(" ", strip=True)
+            if t:
+                return t
+    return None
+
+def _first_attr(el, selectors, attr):
+    for sel in selectors:
+        hit = el.select_one(sel)
+        if hit and hit.has_attr(attr):
+            return hit[attr]
+    return None
+
+def parse_cards_html(soup):
+    rows = []
+    cards = soup.select('[data-testid="listing-card"], article, li[data-testid*="search-result"]')
+    for c in cards:
+        title = _first_text(c, ['[data-testid="listing-card-title"]','h2','h3','a[aria-label]'])
+        address = _first_text(c, ['[data-testid="address-label"]','[data-testid="listing-card-subtitle"]','.property-info__address','[itemprop="streetAddress"]','[data-testid="property-card-subtitle"]'])
+        price = _first_text(c, ['[data-testid="listing-card-price"]','.property-price','[aria-label*="price"]','[data-testid="property-price"]'])
+        link = _first_attr(c, ['a[href*="/property-"]','a[data-testid="listing-card-link"]','a[aria-label]'], 'href')
+        beds = _first_text(c, ['[data-testid="property-features-text-container"]','[data-testid="listing-card-bedroom"]','.general-features__beds','.property-feature__beds'])
+        baths = _first_text(c, ['[data-testid="listing-card-bathroom"]','.general-features__baths','.property-feature__baths'])
+        car = _first_text(c, ['[data-testid="listing-card-carspace"]','.general-features__cars','.property-feature__cars'])
+        if link and link.startswith('/'):
+            link = 'https://www.realestate.com.au' + link
+        # Normalize features
+        def parse_num(txt):
+            if not txt:
+                return None
+            m = re.search(r'(\d+(?:\.\d+)?)', txt)
+            return float(m.group(1)) if m else None
+        rows.append({
+            'title': title,
+            'address': address,
+            'price': price,
+            'beds': parse_num(beds),
+            'baths': parse_num(baths),
+            'car': parse_num(car),
+            'url': link
+        })
+    return [r for r in rows if any(v for v in r.values())]
+
+def parse_ld_json(soup):
+    rows = []
+    for s in soup.find_all('script', type='application/ld+json'):
+        try:
+            data = json.loads(s.string)
+        except Exception:
+            continue
+        if isinstance(data, dict):
+            data = [data]
+        for obj in data:
+            if isinstance(obj, dict) and obj.get('@type') in ('Offer','Residence','SingleFamilyResidence','Apartment','House') or ('@graph' in obj):
+                # Flatten possible graphs
+                items = obj.get('@graph', [obj]) if '@graph' in obj else [obj]
+                for it in items:
+                    addr = it.get('address', {})
+                    price = None
+                    if 'offers' in it and isinstance(it['offers'], dict):
+                        price = it['offers'].get('price') or it['offers'].get('lowPrice')
+                    rows.append({
+                        'title': it.get('name'),
+                        'address': addr.get('streetAddress'),
+                        'price': price,
+                        'beds': it.get('numberOfRooms'),
+                        'baths': it.get('numberOfBathroomsTotal') or it.get('numberOfBathrooms'),
+                        'car': None,
+                        'url': it.get('url')
+                    })
+    return [r for r in rows if any(v for v in r.values())]
+
+def fetch_rea_listings(search_url, pages=1, timeout=15):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Accept-Language": "en-AU,en;q=0.9",
+    }
+    all_rows = []
+    for p in range(1, pages+1):
+        url = re.sub(r'/list-\d+', f'/list-{p}', search_url)
+        try:
+            r = requests.get(url, headers=headers, timeout=timeout)
+            r.raise_for_status()
+        except Exception as e:
+            st.warning(f"Failed to fetch page {p}: {e}")
+            continue
+        soup = BeautifulSoup(r.text, 'html.parser')
+        rows = parse_cards_html(soup)
+        if not rows:
+            rows = parse_ld_json(soup)
+        all_rows.extend(rows)
+    # Deduplicate by URL
+    seen = set()
+    dedup = []
+    for r in all_rows:
+        key = r.get('url') or (r.get('title'), r.get('address'), r.get('price'))
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup.append(r)
+    return pd.DataFrame(dedup)
+
+# UI: Build URL from filtered suburbs
+st.markdown("### Search properties on realestate.com.au and export to CSV")
+if "SA2" in filtered_df.columns:
+    # Ask for state code (REA needs suburb+state)
+    state_code = st.selectbox("State code (e.g., VIC/NSW/WA/SA/QLD/ACT/TAS/NT):", ["VIC","NSW","QLD","WA","SA","ACT","TAS","NT"], index=1)
+    suburb_for_search = st.selectbox("Choose a suburb to search:", sorted(filtered_df["SA2"].dropna().unique()))
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        min_price = st.number_input("Min Price ($)", min_value=0, step=25000, value=0)
+    with col2:
+        max_price = st.number_input("Max Price ($)", min_value=0, step=25000, value=0)
+    with col3:
+        prop_type = st.selectbox("Property Type", ["Any","House","Townhouse","Apartment/Unit","Land","Villa","Duplex"])
+    with col4:
+        beds = st.selectbox("Min Beds", [None,1,2,3,4,5], index=0)
+    max_pages = st.slider("Pages to fetch", 1, 10, 3)
+    # Construct URL
+    base_url = build_rea_search_url(suburb_for_search, state_code, min_price if min_price>0 else None, max_price if max_price>0 else None, prop_type, beds)
+    st.code(base_url, language="text")
+    st.link_button(f"Open REA search for {suburb_for_search}", base_url)
+    custom_url = st.text_input("Or paste a custom realestate.com.au search URL:", value=base_url)
+    if st.button("Fetch listings & make CSV"):
+        with st.spinner("Fetching listings..."):
+            df_list = fetch_rea_listings(custom_url, pages=max_pages)
+        if df_list.empty:
+            st.error("No listings parsed. You may need to adjust the suburb/state or increase pages. Site structure can change.")
+        else:
+            st.success(f"Fetched {len(df_list)} listings")
+            st.dataframe(df_list, use_container_width=True)
+            csv_bytes = df_list.to_csv(index=False).encode()
+            st.download_button("Download listings.csv", data=csv_bytes, file_name=f"{suburb_for_search.replace(' ','_').lower()}_listings.csv", mime="text/csv")
+else:
+    st.info("Filter or load data so SA2 (suburb) options appear.")
+
+# ---------- Trend analysis (unchanged) ----------
 if "SA2" in df.columns:
     selected_sa2s = st.multiselect("Select SA2(s) to view trends:", sorted(df["SA2"].dropna().unique()))
     if selected_sa2s:
