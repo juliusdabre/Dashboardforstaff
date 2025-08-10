@@ -61,6 +61,29 @@ def load_data():
 df = load_data()
 st.title("PropWealth Buyers Agency")
 
+# ---------------- Utilities ----------------
+def _guess_investor_score_col(columns) -> str | None:
+    """
+    Try to find an 'Investor Score' column using fuzzy matching.
+    Examples it will catch:
+      - Investor Score
+      - Investors Score
+      - Investor Score (Out Of 100)
+      - Investor Composite Score
+    """
+    lower_map = {c: str(c).lower() for c in columns}
+    # direct preferred names first
+    for c, lc in lower_map.items():
+        if lc.strip() in ("investor score", "investors score"):
+            return c
+    # fuzzy contains investor & score
+    candidates = [c for c, lc in lower_map.items() if "investor" in lc and "score" in lc]
+    if candidates:
+        # choose the shortest/most specific name
+        candidates.sort(key=lambda x: len(str(x)))
+        return candidates[0]
+    return None
+
 # ---------------- Sidebar: Dynamic Filters ----------------
 # Dynamically list all possible filters based on non-numeric columns
 filter_columns = df.select_dtypes(include=['object']).columns.tolist()
@@ -74,10 +97,35 @@ with st.sidebar:
         if selected:
             selected_filters[col] = selected
 
+    # --- NEW: Investor Score range filter ---
+    investor_col = _guess_investor_score_col(df.columns)
+    inv_min = inv_max = None
+    if investor_col is not None:
+        inv_series = pd.to_numeric(df[investor_col], errors="coerce")
+        # default to 0-100 if looks like a percentage scale; otherwise use data bounds
+        data_min = int(max(0, float(inv_series.min(skipna=True)) if pd.notna(inv_series.min(skipna=True)) else 0))
+        data_max = int(float(inv_series.max(skipna=True)) if pd.notna(inv_series.max(skipna=True)) else 100)
+        # Clamp sensible bounds
+        lower = max(0, min(100, data_min)) if data_max <= 110 else data_min
+        upper = min(100, max(lower, data_max)) if data_max <= 110 else data_max
+
+        inv_min, inv_max = st.slider(
+            f"Investor Score range ({investor_col})",
+            min_value=int(lower),
+            max_value=int(upper),
+            value=(int(lower), int(upper)),
+            help="Drag to keep only rows where Investor Score falls within this range."
+        )
+        st.caption(f"Filtering Investor Score between **{inv_min}** and **{inv_max}**.")
+
 # Apply filters to create the visible dashboard table
 filtered_df = df.copy()
 for col, selected_vals in selected_filters.items():
     filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
+
+# Apply investor score filter if set
+if 'inv_min' in locals() and inv_min is not None and investor_col is not None:
+    filtered_df = filtered_df[pd.to_numeric(filtered_df[investor_col], errors="coerce").between(inv_min, inv_max)]
 
 # Ensure Arrow compatibility before rendering
 filtered_df = _coerce_numeric_cols(filtered_df.copy())
@@ -369,7 +417,7 @@ if "SA2" in df.columns:
                 mime = "image/svg+xml" if fmt == "svg" else f"image/{fmt}" if fmt == "png" else "application/pdf"
                 st.download_button(f"Download Chart as {fmt.upper()}", data=img_data, file_name=f"trend_graph.{fmt}", mime=mime)
             except Exception as e:
-                st.warning(f"❌ Could not export {fmt.UPPER()} chart: {e}")
+                st.warning(f"❌ Could not export {fmt.upper()} chart: {e}")
 
         # Grouped Summary
         st.subheader("2020–2025 Average (Mock Grouping)")
