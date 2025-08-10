@@ -3,6 +3,7 @@ pandas
 plotly
 openpyxl
 requests
-beautifulsoup4
 kaleido
+beautifulsoup4
+soupsieve
 lxml
