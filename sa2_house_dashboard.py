@@ -26,14 +26,13 @@ def _coerce_numeric_cols(df: pd.DataFrame) -> pd.DataFrame:
         if df[col].dtype == "bool":
             bool_like.append(col)
         else:
-            # objects that look like booleans mixed in
             vals = df[col].dropna().unique()
             if len(vals) and all(v in [True, False, "True", "False", "TRUE", "FALSE"] for v in vals):
                 bool_like.append(col)
     for col in bool_like:
         df[col] = df[col].map({True: 1, False: 0, "True": 1, "False": 0, "TRUE": 1, "FALSE": 0}).astype("Int64")
 
-    # Target columns with numeric hints in the name for coercion
+    # Target columns with numeric hints
     for col in df.columns:
         name = str(col).lower()
         if any(h in name for h in NUMERIC_HINTS):
@@ -42,10 +41,8 @@ def _coerce_numeric_cols(df: pd.DataFrame) -> pd.DataFrame:
                 errors='coerce'
             )
 
-    # Specific fix for known column in logs
     if "Sales Turnover Score (SA2)" in df.columns:
         df["Sales Turnover Score (SA2)"] = pd.to_numeric(df["Sales Turnover Score (SA2)"], errors="coerce")
-
     return df
 
 @st.cache_data
@@ -63,29 +60,17 @@ st.title("PropWealth Buyers Agency")
 
 # ---------------- Utilities ----------------
 def _guess_investor_score_col(columns) -> str | None:
-    """
-    Try to find an 'Investor Score' column using fuzzy matching.
-    Examples it will catch:
-      - Investor Score
-      - Investors Score
-      - Investor Score (Out Of 100)
-      - Investor Composite Score
-    """
     lower_map = {c: str(c).lower() for c in columns}
-    # direct preferred names first
     for c, lc in lower_map.items():
         if lc.strip() in ("investor score", "investors score"):
             return c
-    # fuzzy contains investor & score
     candidates = [c for c, lc in lower_map.items() if "investor" in lc and "score" in lc]
     if candidates:
-        # choose the shortest/most specific name
         candidates.sort(key=lambda x: len(str(x)))
         return candidates[0]
     return None
 
 # ---------------- Sidebar: Dynamic Filters ----------------
-# Dynamically list all possible filters based on non-numeric columns
 filter_columns = df.select_dtypes(include=['object']).columns.tolist()
 
 with st.sidebar:
@@ -97,15 +82,13 @@ with st.sidebar:
         if selected:
             selected_filters[col] = selected
 
-    # --- NEW: Investor Score range filter ---
+    # Investor Score slider
     investor_col = _guess_investor_score_col(df.columns)
     inv_min = inv_max = None
     if investor_col is not None:
         inv_series = pd.to_numeric(df[investor_col], errors="coerce")
-        # default to 0-100 if looks like a percentage scale; otherwise use data bounds
         data_min = int(max(0, float(inv_series.min(skipna=True)) if pd.notna(inv_series.min(skipna=True)) else 0))
         data_max = int(float(inv_series.max(skipna=True)) if pd.notna(inv_series.max(skipna=True)) else 100)
-        # Clamp sensible bounds
         lower = max(0, min(100, data_min)) if data_max <= 110 else data_min
         upper = min(100, max(lower, data_max)) if data_max <= 110 else data_max
 
@@ -118,20 +101,18 @@ with st.sidebar:
         )
         st.caption(f"Filtering Investor Score between **{inv_min}** and **{inv_max}**.")
 
-# Apply filters to create the visible dashboard table
+# Apply filters
 filtered_df = df.copy()
 for col, selected_vals in selected_filters.items():
     filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
 
-# Apply investor score filter if set
 if 'inv_min' in locals() and inv_min is not None and investor_col is not None:
     filtered_df = filtered_df[pd.to_numeric(filtered_df[investor_col], errors="coerce").between(inv_min, inv_max)]
 
-# Ensure Arrow compatibility before rendering
 filtered_df = _coerce_numeric_cols(filtered_df.copy())
 st.dataframe(filtered_df, use_container_width=True)
 
-# ---------------- Downloads for Filtered Data ----------------
+# ---------------- Downloads ----------------
 st.download_button(
     "Download Filtered Data as CSV",
     data=filtered_df.to_csv(index=False).encode(),
@@ -152,7 +133,6 @@ st.download_button(
 
 # ---------------- realestate.com.au Helpers ----------------
 def build_rea_search_url(suburb:str, state_code:str, min_price:int|None=None, max_price:int|None=None, prop_type:str|None=None, beds:int|None=None, page:int=1):
-    # suburb slug like 'cranbourne-vic'
     slug = f"{suburb.strip().lower().replace(' ', '-')}-{state_code.lower()}"
     base = f"https://www.realestate.com.au/buy/in-{slug}/list-{page}"
     params = []
@@ -160,7 +140,6 @@ def build_rea_search_url(suburb:str, state_code:str, min_price:int|None=None, ma
         lo = 0 if min_price is None else int(min_price)
         hi = "" if max_price is None else int(max_price)
         params.append(f"price={lo}-{hi}")
-    # property type mapping
     pt_map = {
         "Any": "",
         "House": "property-house",
@@ -207,7 +186,6 @@ def parse_cards_html(soup):
         car = _first_text(c, ['[data-testid="listing-card-carspace"]','.general-features__cars','.property-feature__cars'])
         if link and link.startswith('/'):
             link = 'https://www.realestate.com.au' + link
-        # Normalize features
         def parse_num(txt):
             if not txt:
                 return None
@@ -271,7 +249,6 @@ def fetch_rea_listings(search_url, pages=1, timeout=15):
         if not rows:
             rows = parse_ld_json(soup)
         all_rows.extend(rows)
-    # Deduplicate by URL
     seen = set()
     dedup = []
     for rrow in all_rows:
@@ -286,12 +263,6 @@ def fetch_rea_listings(search_url, pages=1, timeout=15):
 st.markdown("### Search properties on realestate.com.au and export to CSV")
 
 def _clean_sa2_to_suburb(sa2: str) -> str:
-    """
-    Convert SA2 label to a suburb-like name for REA search:
-    - Remove anything after ' - ' (e.g., 'Cranbourne - West' -> 'Cranbourne')
-    - Remove parenthetical suffixes (e.g., '(SA2)')
-    - Collapse extra spaces
-    """
     if not isinstance(sa2, str):
         return sa2
     base = sa2.split(" - ")[0]
@@ -299,32 +270,20 @@ def _clean_sa2_to_suburb(sa2: str) -> str:
     base = re.sub(r"\s+", " ", base).strip()
     return base
 
-# Build suburb list strictly from what's currently visible on the dashboard
 if "SA2" in filtered_df.columns and not filtered_df.empty:
     visible_sa2 = (
-        filtered_df["SA2"]
-        .dropna()
-        .astype(str)
-        .str.strip()
-        .unique()
-        .tolist()
+        filtered_df["SA2"].dropna().astype(str).str.strip().unique().tolist()
     )
     if not visible_sa2:
         st.info("No suburbs visible after filters. Adjust filters to enable search.")
     else:
         sa2_to_suburb = {sa2: _clean_sa2_to_suburb(sa2) for sa2 in visible_sa2}
 
-        # Detect state codes from the visible rows (assumes your dataset has a 'State' column with codes like NSW/VIC/WA)
         state_col = "State" if "State" in filtered_df.columns else None
         if state_col:
             visible_states = (
                 filtered_df.loc[filtered_df["SA2"].isin(visible_sa2), state_col]
-                .dropna()
-                .astype(str)
-                .str.upper()
-                .str.strip()
-                .unique()
-                .tolist()
+                .dropna().astype(str).str.upper().str.strip().unique().tolist()
             )
         else:
             visible_states = []
@@ -387,11 +346,114 @@ if "SA2" in filtered_df.columns and not filtered_df.empty:
 else:
     st.info("Apply filters or load data so SA2 (suburb) options appear on the dashboard first.")
 
-# ---------------- Trend Analysis ----------------
+# ---------------- Suburb Trends: Price & Days on Market ----------------
+st.subheader("Suburb Trends: Price & Days on Market")
+
+def _find_timeseries_columns(columns, metric_keywords):
+    """
+    Return a list of columns that look like time-series for the metric:
+    - Column name must contain one of metric_keywords
+    - And contain a year-like token (2019..2030) or month name/abbrev
+    """
+    months = ("jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec",
+              "january","february","march","april","june","july","august","september","october","november","december")
+    out = []
+    for c in columns:
+        lc = str(c).lower()
+        if any(k in lc for k in metric_keywords) and (re.search(r'(19|20)\d{2}', lc) or any(m in lc for m in months)):
+            out.append(c)
+    return out
+
+def _extract_period(name: str):
+    """Try to map a column name to an ordered period string for plotting/sorting."""
+    n = str(name)
+    # Prefer YYYY-MM in name
+    y = re.search(r'((19|20)\d{2})', n)
+    m = re.search(r'(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)', n.lower())
+    if y and m:
+        return f"{y.group(1)}-{m.group(1).title()}"
+    if y:
+        return y.group(1)
+    if m:
+        return m.group(1).title()
+    return n
+
+def _plot_metric_trend(metric_name, metric_keywords):
+    cols_ts = _find_timeseries_columns(df.columns, metric_keywords)
+    if cols_ts:
+        # Build tidy df: period, SA2, value
+        periods = {c: _extract_period(c) for c in cols_ts}
+        # Keep periods sorted by (year, month) if possible
+        def _period_key(p):
+            y = re.search(r'(19|20)\d{2}', p)
+            m_map = {'Jan':1,'Feb':2,'Mar':3,'Apr':4,'May':5,'Jun':6,'Jul':7,'Aug':8,'Sep':9,'Oct':10,'Nov':11,'Dec':12}
+            m = None
+            for k,v in m_map.items():
+                if k.lower() in p.lower():
+                    m = v; break
+            return (int(y.group(0)) if y else 0, m if m else 0, p)
+
+        ordered = sorted(periods.items(), key=lambda kv: _period_key(kv[1]))
+        ordered_cols = [c for c,_ in ordered]
+
+        selected_sa2s = st.multiselect(f"Select SA2(s) for {metric_name} trend:", sorted(filtered_df["SA2"].dropna().unique()), key=f"{metric_name}_ts_sa2")
+        if not selected_sa2s:
+            st.info(f"Pick one or more SA2s above to see {metric_name} trends.")
+            return
+
+        fig = go.Figure()
+        for sa2 in selected_sa2s:
+            sub = df[df["SA2"] == sa2]
+            if sub.empty:
+                continue
+            yvals = []
+            xvals = []
+            for c in ordered_cols:
+                val = pd.to_numeric(sub[c], errors="coerce")
+                if not val.empty and pd.notna(val.iloc[0]):
+                    yvals.append(float(val.iloc[0]))
+                    xvals.append(periods[c])
+            if xvals and yvals:
+                fig.add_trace(go.Scatter(x=xvals, y=yvals, mode="lines+markers", name=sa2))
+        fig.update_layout(title=f"{metric_name} Trend", xaxis_title="Period", yaxis_title=metric_name, hovermode="x unified", legend_title="SA2")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        # Fallback: plot current levels (bar) if we only have a single column
+        # Try to find a single current metric column
+        single_candidates = [c for c in df.columns if any(k in str(c).lower() for k in metric_keywords)]
+        single_col = None
+        if single_candidates:
+            # Prefer ones with 'median' for price and 'days'/'dom' for DOM, else pick shortest
+            if any('median' in str(c).lower() for c in single_candidates):
+                single_col = [c for c in single_candidates if 'median' in str(c).lower()][0]
+            else:
+                single_candidates.sort(key=lambda x: len(str(x)))
+                single_col = single_candidates[0]
+
+        if single_col is None:
+            st.warning(f"No columns found for {metric_name}.")
+            return
+
+        # Show current levels for visible SA2s
+        sub = filtered_df[["SA2", single_col]].dropna()
+        if sub.empty:
+            st.info(f"No data to plot for {metric_name} in the current selection.")
+            return
+        sub = sub.sort_values(by=single_col, ascending=False).head(25)  # top 25 for readability
+        fig = go.Figure(data=[go.Bar(x=sub["SA2"].astype(str), y=pd.to_numeric(sub[single_col], errors="coerce"))])
+        fig.update_layout(title=f"{metric_name} (Current Levels)", xaxis_title="SA2", yaxis_title=single_col, xaxis_tickangle=-45)
+        st.plotly_chart(fig, use_container_width=True)
+
+# Price trend
+_plot_metric_trend("Median Price", metric_keywords=("price","median price","median_value","median"))
+# Days on Market trend
+_plot_metric_trend("Days on Market", metric_keywords=("days on market","dom","days"))
+
+# ---------------- Trend Analysis (Generic) ----------------
 if "SA2" in df.columns:
-    selected_sa2s = st.multiselect("Select SA2(s) to view trends:", sorted(df["SA2"].dropna().unique()))
+    selected_sa2s = st.multiselect("Select SA2(s) to view generic trends:", sorted(df["SA2"].dropna().unique()), key="generic_trends_sa2")
     if selected_sa2s:
-        st.subheader("Trend Comparison")
+        st.subheader("Generic Trend Comparison")
         fig = go.Figure()
         group_data = []
 
@@ -410,29 +472,12 @@ if "SA2" in df.columns:
         fig.update_layout(title="Year-wise Trends by SA2", xaxis_title="Year/Metric", yaxis_title="Value", hovermode="x unified", legend_title="SA2")
         st.plotly_chart(fig, use_container_width=True)
 
-        # Export chart safely
         for fmt in ["png", "svg", "pdf"]:
             try:
                 img_data = pio.to_image(fig, format=fmt, engine="kaleido")
                 mime = "image/svg+xml" if fmt == "svg" else f"image/{fmt}" if fmt == "png" else "application/pdf"
-                st.download_button(f"Download Chart as {fmt.upper()}", data=img_data, file_name=f"trend_graph.{fmt}", mime=mime)
+                st.download_button(f"Download Generic Trend as {fmt.upper()}", data=img_data, file_name=f"trend_graph.{fmt}", mime=mime)
             except Exception as e:
                 st.warning(f"❌ Could not export {fmt.upper()} chart: {e}")
-
-        # Grouped Summary
-        st.subheader("2020–2025 Average (Mock Grouping)")
-        avg_table = pd.DataFrame(group_data, columns=["SA2", "2020–2025 Avg"])
-        st.table(avg_table)
-
-        # AI Summary
-        st.subheader("AI Summary for Selected SA2(s)")
-        for sa2, avg_val in group_data:
-            if avg_val > 65:
-                msg = f"🔵 {sa2} shows very strong performance based on recent trends."
-            elif avg_val > 50:
-                msg = f"🟡 {sa2} has moderate performance with room to grow."
-            else:
-                msg = f"🔴 {sa2} is currently underperforming in comparison to others."
-            st.markdown(msg)
 else:
     st.error("SA2 column not found in the dataset.")
