@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 import json
 import re
 
+# ---------------- Basic App Setup ----------------
 st.set_page_config(page_title="SA2 House Dashboard", layout="wide")
 
 NUMERIC_HINTS = (
@@ -36,7 +37,10 @@ def _coerce_numeric_cols(df: pd.DataFrame) -> pd.DataFrame:
     for col in df.columns:
         name = str(col).lower()
         if any(h in name for h in NUMERIC_HINTS):
-            df[col] = pd.to_numeric(df[col].astype(str).str.replace('%','', regex=False).str.replace(',','', regex=False), errors='coerce')
+            df[col] = pd.to_numeric(
+                df[col].astype(str).str.replace('%','', regex=False).str.replace(',','', regex=False),
+                errors='coerce'
+            )
 
     # Specific fix for known column in logs
     if "Sales Turnover Score (SA2)" in df.columns:
@@ -57,6 +61,7 @@ def load_data():
 df = load_data()
 st.title("PropWealth Buyers Agency")
 
+# ---------------- Sidebar: Dynamic Filters ----------------
 # Dynamically list all possible filters based on non-numeric columns
 filter_columns = df.select_dtypes(include=['object']).columns.tolist()
 
@@ -69,6 +74,7 @@ with st.sidebar:
         if selected:
             selected_filters[col] = selected
 
+# Apply filters to create the visible dashboard table
 filtered_df = df.copy()
 for col, selected_vals in selected_filters.items():
     filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
@@ -77,16 +83,26 @@ for col, selected_vals in selected_filters.items():
 filtered_df = _coerce_numeric_cols(filtered_df.copy())
 st.dataframe(filtered_df, use_container_width=True)
 
-# CSV and Excel download
-st.download_button("Download Filtered Data as CSV", data=filtered_df.to_csv(index=False).encode(), file_name="filtered_data.csv", mime="text/csv")
+# ---------------- Downloads for Filtered Data ----------------
+st.download_button(
+    "Download Filtered Data as CSV",
+    data=filtered_df.to_csv(index=False).encode(),
+    file_name="filtered_data.csv",
+    mime="text/csv"
+)
 
 excel_buffer = BytesIO()
 with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
     filtered_df.to_excel(writer, index=False, sheet_name="Filtered")
 excel_buffer.seek(0)
-st.download_button("Download Filtered Data as Excel", data=excel_buffer, file_name="filtered_data.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+st.download_button(
+    "Download Filtered Data as Excel",
+    data=excel_buffer,
+    file_name="filtered_data.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
 
-# ---------- realestate.com.au SEARCH + SCRAPE TO CSV ----------
+# ---------------- realestate.com.au Helpers ----------------
 def build_rea_search_url(suburb:str, state_code:str, min_price:int|None=None, max_price:int|None=None, prop_type:str|None=None, beds:int|None=None, page:int=1):
     # suburb slug like 'cranbourne-vic'
     slug = f"{suburb.strip().lower().replace(' ', '-')}-{state_code.lower()}"
@@ -179,7 +195,7 @@ def parse_ld_json(soup):
                         price = it['offers'].get('price') or it['offers'].get('lowPrice')
                     rows.append({
                         'title': it.get('name'),
-                        'address': addr.get('streetAddress'),
+                        'address': addr.get('streetAddress') if isinstance(addr, dict) else None,
                         'price': price,
                         'beds': it.get('numberOfRooms'),
                         'baths': it.get('numberOfBathroomsTotal') or it.get('numberOfBathrooms'),
@@ -210,46 +226,120 @@ def fetch_rea_listings(search_url, pages=1, timeout=15):
     # Deduplicate by URL
     seen = set()
     dedup = []
-    for r in all_rows:
-        key = r.get('url') or (r.get('title'), r.get('address'), r.get('price'))
+    for rrow in all_rows:
+        key = rrow.get('url') or (rrow.get('title'), rrow.get('address'), rrow.get('price'))
         if key in seen:
             continue
         seen.add(key)
-        dedup.append(r)
+        dedup.append(rrow)
     return pd.DataFrame(dedup)
 
+# ---------------- Search UI (Restricted to Visible SA2s) ----------------
 st.markdown("### Search properties on realestate.com.au and export to CSV")
-if "SA2" in filtered_df.columns:
-    state_code = st.selectbox("State code (e.g., VIC/NSW/WA/SA/QLD/ACT/TAS/NT):", ["VIC","NSW","QLD","WA","SA","ACT","TAS","NT"], index=1)
-    suburb_for_search = st.selectbox("Choose a suburb to search:", sorted(filtered_df["SA2"].dropna().unique()))
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        min_price = st.number_input("Min Price ($)", min_value=0, step=25000, value=0)
-    with col2:
-        max_price = st.number_input("Max Price ($)", min_value=0, step=25000, value=0)
-    with col3:
-        prop_type = st.selectbox("Property Type", ["Any","House","Townhouse","Apartment/Unit","Land","Villa","Duplex"])
-    with col4:
-        beds = st.selectbox("Min Beds", [None,1,2,3,4,5], index=0)
-    max_pages = st.slider("Pages to fetch", 1, 10, 3)
-    base_url = build_rea_search_url(suburb_for_search, state_code, min_price if min_price>0 else None, max_price if max_price>0 else None, prop_type, beds)
-    st.code(base_url, language="text")
-    st.link_button(f"Open REA search for {suburb_for_search}", base_url)
-    custom_url = st.text_input("Or paste a custom realestate.com.au search URL:", value=base_url)
-    if st.button("Fetch listings & make CSV"):
-        with st.spinner("Fetching listings..."):
-            df_list = fetch_rea_listings(custom_url, pages=max_pages)
-        if df_list.empty:
-            st.error("No listings parsed. Try increasing pages or paste the exact search URL from your browser.")
-        else:
-            st.success(f"Fetched {len(df_list)} listings")
-            st.dataframe(df_list, use_container_width=True)
-            csv_bytes = df_list.to_csv(index=False).encode()
-            st.download_button("Download listings.csv", data=csv_bytes, file_name=f"{suburb_for_search.replace(' ','_').lower()}_listings.csv", mime="text/csv")
-else:
-    st.info("Filter or load data so SA2 (suburb) options appear.")
 
-# ---------- Trend analysis ----------
+def _clean_sa2_to_suburb(sa2: str) -> str:
+    """
+    Convert SA2 label to a suburb-like name for REA search:
+    - Remove anything after ' - ' (e.g., 'Cranbourne - West' -> 'Cranbourne')
+    - Remove parenthetical suffixes (e.g., '(SA2)')
+    - Collapse extra spaces
+    """
+    if not isinstance(sa2, str):
+        return sa2
+    base = sa2.split(" - ")[0]
+    base = re.sub(r"\s*\([^)]*\)\s*", " ", base)
+    base = re.sub(r"\s+", " ", base).strip()
+    return base
+
+# Build suburb list strictly from what's currently visible on the dashboard
+if "SA2" in filtered_df.columns and not filtered_df.empty:
+    visible_sa2 = (
+        filtered_df["SA2"]
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .unique()
+        .tolist()
+    )
+    if not visible_sa2:
+        st.info("No suburbs visible after filters. Adjust filters to enable search.")
+    else:
+        sa2_to_suburb = {sa2: _clean_sa2_to_suburb(sa2) for sa2 in visible_sa2}
+
+        # Detect state codes from the visible rows (assumes your dataset has a 'State' column with codes like NSW/VIC/WA)
+        state_col = "State" if "State" in filtered_df.columns else None
+        if state_col:
+            visible_states = (
+                filtered_df.loc[filtered_df["SA2"].isin(visible_sa2), state_col]
+                .dropna()
+                .astype(str)
+                .str.upper()
+                .str.strip()
+                .unique()
+                .tolist()
+            )
+        else:
+            visible_states = []
+
+        suburb_for_search_sa2 = st.selectbox(
+            "Choose a suburb (from current dashboard):",
+            sorted(visible_sa2),
+            help="Only suburbs visible after applying the sidebar filters are listed."
+        )
+        suburb_clean = sa2_to_suburb.get(suburb_for_search_sa2, suburb_for_search_sa2)
+
+        if len(visible_states) == 1:
+            state_code = visible_states[0]
+            st.caption(f"State auto-detected from filtered data: **{state_code}**")
+        else:
+            state_options = visible_states if visible_states else ["VIC","NSW","QLD","WA","SA","ACT","TAS","NT"]
+            default_idx = state_options.index("NSW") if "NSW" in state_options else 0
+            state_code = st.selectbox("State code:", state_options, index=default_idx)
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            min_price = st.number_input("Min Price ($)", min_value=0, step=25000, value=0)
+        with col2:
+            max_price = st.number_input("Max Price ($)", min_value=0, step=25000, value=0)
+        with col3:
+            prop_type = st.selectbox("Property Type", ["Any","House","Townhouse","Apartment/Unit","Land","Villa","Duplex"])
+        with col4:
+            beds = st.selectbox("Min Beds", [None,1,2,3,4,5], index=0)
+
+        max_pages = st.slider("Pages to fetch", 1, 10, 3)
+
+        base_url = build_rea_search_url(
+            suburb_clean,
+            state_code,
+            min_price if min_price > 0 else None,
+            max_price if max_price > 0 else None,
+            prop_type,
+            beds
+        )
+        st.code(base_url, language="text")
+        st.link_button(f"Open REA search for {suburb_clean}, {state_code}", base_url)
+
+        custom_url = st.text_input("Or paste a custom realestate.com.au search URL:", value=base_url)
+
+        if st.button("Fetch listings & make CSV"):
+            with st.spinner("Fetching listings..."):
+                df_list = fetch_rea_listings(custom_url, pages=max_pages)
+            if df_list.empty:
+                st.error("No listings parsed. Try increasing pages or paste the exact search URL from your browser.")
+            else:
+                st.success(f"Fetched {len(df_list)} listings")
+                st.dataframe(df_list, use_container_width=True)
+                csv_bytes = df_list.to_csv(index=False).encode()
+                st.download_button(
+                    "Download listings.csv",
+                    data=csv_bytes,
+                    file_name=f"{suburb_clean.replace(' ','_').lower()}_listings.csv",
+                    mime="text/csv"
+                )
+else:
+    st.info("Apply filters or load data so SA2 (suburb) options appear on the dashboard first.")
+
+# ---------------- Trend Analysis ----------------
 if "SA2" in df.columns:
     selected_sa2s = st.multiselect("Select SA2(s) to view trends:", sorted(df["SA2"].dropna().unique()))
     if selected_sa2s:
@@ -279,7 +369,7 @@ if "SA2" in df.columns:
                 mime = "image/svg+xml" if fmt == "svg" else f"image/{fmt}" if fmt == "png" else "application/pdf"
                 st.download_button(f"Download Chart as {fmt.upper()}", data=img_data, file_name=f"trend_graph.{fmt}", mime=mime)
             except Exception as e:
-                st.warning(f"❌ Could not export {fmt.upper()} chart: {e}")
+                st.warning(f"❌ Could not export {fmt.UPPER()} chart: {e}")
 
         # Grouped Summary
         st.subheader("2020–2025 Average (Mock Grouping)")
